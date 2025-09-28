@@ -1,0 +1,164 @@
+  library(GA)
+  library(ggplot2)
+  
+# Part 1: PORTFOLIO OPTIMIZATION
+  assets <- data.frame(
+    Asset  = c("Apple", "Microsoft", "Amazon", "Reliance Industries", "Tata Consultancy Services","HDFC Bank", "Alphabet", "Infosys", "Facebook", "ICICI Bank"),
+    Return = c(0.20, 0.18, 0.22, 0.16, 0.15, 0.14, 0.21, 0.17, 0.19, 0.16),
+    Risk   = c(0.25, 0.23, 0.28, 0.20, 0.18, 0.19, 0.26, 0.22, 0.21, 0.20)
+  )
+  set.seed(123)
+  n_assets <- nrow(assets)
+  corr_matrix <- matrix(runif(n_assets^2, 0.3, 0.9), n_assets, n_assets)
+  diag(corr_matrix) <- 1
+  cov_matrix <- diag(assets$Risk) %*% corr_matrix %*% diag(assets$Risk)
+  train_returns <- assets$Return
+  set.seed(456)
+  test_returns <- train_returns + rnorm(n_assets, mean = -0.01, sd = 0.005)
+  
+  fitness_function <- function(weights) {
+    norm_weights <- weights / sum(weights)
+    port_return <- sum(norm_weights * train_returns)
+    port_risk <- sqrt(t(norm_weights) %*% cov_matrix %*% norm_weights)
+    return(port_return / port_risk)
+  }
+  
+    set.seed(123)
+    ga_opt <- ga(type = "real-valued", fitness = fitness_function,
+                 lower = rep(0, n_assets), upper = rep(1, n_assets),
+                 popSize = 100, maxiter = 200, pmutation = 0.2)
+    optimal_weights <- ga_opt@solution[1, ] / sum(ga_opt@solution[1, ])
+    optimal_portfolio <- data.frame(Asset = assets$Asset, Weight = optimal_weights)
+    port_return_train <- sum(optimal_weights * train_returns)
+    port_risk_train <- sqrt(t(optimal_weights) %*% cov_matrix %*% optimal_weights)
+    
+    cat("=== Part 1: Portfolio Optimization (Train Data) ===\n")
+    print(optimal_portfolio)
+    cat(sprintf("Optimized Portfolio: Return = %.4f, Risk = %.4f\n", port_return_train, port_risk_train))
+  
+  balanced_weights <- rep(1/n_assets, n_assets)
+  balanced_return <- sum(balanced_weights * train_returns)
+  balanced_risk <- sqrt(t(balanced_weights) %*% cov_matrix %*% balanced_weights)
+  cat("Balanced Portfolio (Equal Weights):\n")
+  cat(sprintf("Return = %.4f, Risk = %.4f\n", balanced_return, balanced_risk))
+  
+  generate_random_portfolios <- function(n_random, n_assets, returns, cov_mat) {
+    weights <- matrix(runif(n_random * n_assets), n_random, n_assets)
+    weights <- t(apply(weights, 1, function(w) w / sum(w)))
+    data.frame(Return = rowSums(weights * returns),
+               Risk = apply(weights, 1, function(w) sqrt(t(w) %*% cov_mat %*% w)))
+  }
+  rand_portfolios_train <- generate_random_portfolios(1000, n_assets, train_returns, cov_matrix)
+  train_plot_data <- rbind(data.frame(rand_portfolios_train, Type = "Random"),
+                           data.frame(Return = port_return_train, Risk = port_risk_train, Type = "Optimized"))
+  p_train <- ggplot(train_plot_data, aes(x = Risk, y = Return, color = Type)) +
+    geom_point(alpha = 0.8, size = 3) +
+    scale_color_manual(values = c("Random" = "orange", "Optimized" = "green")) +
+    ggtitle("Portfolio Risk-Return (Training Data)") +
+    xlab("Risk (Std. Dev)") + ylab("Return") +
+    theme_minimal() + theme(legend.position = "bottom")
+  print(p_train)
+  
+  port_return_test <- sum(optimal_weights * test_returns)
+  port_risk_test <- sqrt(t(optimal_weights) %*% cov_matrix %*% optimal_weights)
+  cat("=== Portfolio Performance on Test Data ===\n")
+  cat(sprintf("Return (Test) = %.4f, Risk (Test) = %.4f\n", port_return_test, port_risk_test))
+  rand_portfolios_test <- generate_random_portfolios(1000, n_assets, test_returns, cov_matrix)
+  test_plot_data <- rbind(data.frame(rand_portfolios_test, Type = "Random"),
+                          data.frame(Return = port_return_test, Risk = port_risk_test, Type = "Optimized"))
+  
+  p_test <- ggplot(test_plot_data, aes(x = Risk, y = Return, color = Type)) +
+    geom_point(alpha = 0.8, size = 3) +
+    scale_color_manual(values = c("Random" = "orange", "Optimized" = "green")) +
+    ggtitle("Portfolio Risk-Return (Test Data)") +
+    xlab("Risk (Std. Dev)") + ylab("Return") +
+    theme_minimal() + theme(legend.position = "bottom")
+  print(p_test)
+  
+  alphas <- c(0, 0.25, 0.5, 0.75, 1)
+  tradeoff_results <- data.frame()
+  for (alpha in alphas) {
+    tradeoff_fitness <- function(w) {
+      norm_w <- w / sum(w)
+      ret <- sum(norm_w * train_returns)
+      risk <- sqrt(t(norm_w) %*% cov_matrix %*% norm_w)
+      return(alpha * ret - (1 - alpha) * risk)
+    }
+    ga_tradeoff <- ga(type = "real-valued", fitness = tradeoff_fitness,
+                      lower = rep(0, n_assets), upper = rep(1, n_assets),
+                      popSize = 100, maxiter = 200, pmutation = 0.2)
+    w_opt <- ga_tradeoff@solution[1, ] / sum(ga_tradeoff@solution[1, ])
+    ret_opt <- sum(w_opt * train_returns)
+    risk_opt <- sqrt(t(w_opt) %*% cov_matrix %*% w_opt)
+    tradeoff_results <- rbind(tradeoff_results, data.frame(Alpha = alpha, Return = ret_opt, Risk = risk_opt))
+  }
+  p_tradeoff <- ggplot(tradeoff_results, aes(x = Risk, y = Return, label = Alpha)) +
+    geom_point(size = 4, color = "darkgreen") +
+    geom_text(nudge_x = 0.002, nudge_y = 0.002, color = "black") +
+    ggtitle("Risk-Return Trade-off (Training Data)") +
+    xlab("Risk (Std. Dev)") + ylab("Return") +
+    theme_minimal()
+  print(p_tradeoff)
+  
+# Part 2: ASSETS SELECTION USING GENETIC ALGORITHM
+  company_names <- c(
+    "Apple", "Microsoft", "Amazon", "Alphabet", "Facebook", "Berkshire Hathaway",
+    "Johnson & Johnson", "JPMorgan Chase", "Visa", "Procter & Gamble", "Intel", "Coca-Cola",
+    "Pfizer", "ExxonMobil", "Chevron", "Walmart", "Disney", "Nike", "Mastercard", "Netflix",
+    "Cisco Systems", "Oracle", "AT&T", "Verizon", "IBM", "McDonald's", "General Electric",
+    "Goldman Sachs", "Morgan Stanley", "FedEx", "UPS", "Reliance Industries","Tata Consultancy Services", "HDFC Bank", "Infosys", "ICICI Bank", "HUL", "Larsen & Toubro", "Bharti Airtel", "Asian Paints", "Bajaj Finance", "Maruti Suzuki","Tata Motors", "Wipro", "Adani Ports", "State Bank of India", "Kotak Mahindra Bank","Sun Pharma", "Dr. Reddy's Laboratories", "Bajaj Finserv"
+  )
+  set.seed(123)
+  asset_pool <- data.frame(
+    Asset  = company_names,
+    Return = runif(50, 0.07, 0.18),
+    Risk   = runif(50, 0.15, 0.35)
+  )
+  corr_matrix_pool <- matrix(runif(50^2, 0.3, 0.9), 50, 50)
+  diag(corr_matrix_pool) <- 1
+  cov_matrix_pool <- diag(asset_pool$Risk) %*% corr_matrix_pool %*% diag(asset_pool$Risk)
+  
+  asset_selection_fitness <- function(selected) {
+    indices <- which(selected == 1)
+    if (length(indices) == 0) return(0)
+    sub_returns <- asset_pool$Return[indices]
+    sub_cov <- cov_matrix_pool[indices, indices]
+    eq_weights <- rep(1/length(indices), length(indices))
+    port_return <- sum(eq_weights * sub_returns)
+    port_risk <- sqrt(t(eq_weights) %*% sub_cov %*% eq_weights)
+    return(port_return / port_risk)
+  }
+  set.seed(123)
+  ga_asset_select <- ga(type = "binary", fitness = asset_selection_fitness,
+                        nBits = nrow(asset_pool), popSize = 100, maxiter = 200, pmutation = 0.1)
+  selected_indices <- which(ga_asset_select@solution[1, ] == 1)
+  selected_assets_basic <- asset_pool[selected_indices, ]
+  cat("\n=== Part 2: Basic Asset Selection Results ===\n")
+  print(selected_assets_basic)
+  
+  integrated_asset_fitness <- function(selected) {
+    indices <- which(selected == 1)
+    if (length(indices) == 0) return(0)
+    sub_assets <- asset_pool[indices, ]
+    sub_cov <- diag(sub_assets$Risk) %*% corr_matrix_pool[indices, indices] %*% diag(sub_assets$Risk)
+    weight_fitness <- function(w) {
+      norm_w <- w / sum(w)
+      ret <- sum(norm_w * sub_assets$Return)
+      risk <- sqrt(t(norm_w) %*% sub_cov %*% norm_w)
+      return(ret / risk)
+    }
+    inner_ga <- ga(type = "real-valued", fitness = weight_fitness,
+                   lower = rep(0, length(indices)), upper = rep(1, length(indices)),
+                   popSize = 20, maxiter = 20, pmutation = 0.1, optim = FALSE)
+    return(inner_ga@fitnessValue)
+  }
+  set.seed(456)
+  ga_integrated <- ga(type = "binary", fitness = integrated_asset_fitness,
+                      nBits = nrow(asset_pool), popSize = 20, maxiter = 20, pmutation = 0.1)
+                      
+  selected_indices_int <- which(ga_integrated@solution[1, ] == 1)
+  selected_assets_integrated <- asset_pool[selected_indices_int, ]
+  cat("\n=== Part 2: Integrated Asset Selection Results ===\n")
+  print(selected_assets_integrated)
+  
+  cat("\nScript execution completed.\n")
